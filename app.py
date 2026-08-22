@@ -3,10 +3,11 @@ from recommendation import MovieRecommender
 
 app = Flask(__name__)
 
-# Load the TMDB 5000 dataset and build the recommendation model
+# Load the TMDB 5000 dataset + Tamil movies dataset and build the recommendation model
 recommender = MovieRecommender(
     "dataset/tmdb_5000_movies.csv",
-    "dataset/tmdb_5000_credits.csv"
+    "dataset/tmdb_5000_credits.csv",
+    "dataset/Tamil_movies_dataset.csv"
 )
 
 @app.route("/")
@@ -43,6 +44,21 @@ def genre():
 
     results = recommender.get_by_genre(name, limit)
     return jsonify(results)
+
+@app.route("/language", methods=["GET"])
+def language():
+    name = request.args.get("name", "").strip()
+    limit = request.args.get("limit", 30, type=int)
+
+    if not name:
+        return jsonify({"error": "Please provide a language."}), 400
+
+    results = recommender.get_by_language(name, limit)
+    return jsonify(results)
+
+@app.route("/languages", methods=["GET"])
+def languages():
+    return jsonify(recommender.list_languages())
 
 if __name__ == "__main__":
     app.run(debug=True)

@@ -129,6 +129,30 @@
   .genre-pill:hover{ border-color: var(--teal); color: var(--teal); transform: translateY(-2px); }
   .genre-pill.active{ background: var(--marquee); border-color: var(--marquee); color: #1a1408; font-weight:600; }
 
+  /* ---------- language pills ---------- */
+  .lang-row{
+    position:relative; z-index: 1;
+    display:flex; flex-wrap:wrap; justify-content:center; gap: 8px;
+    max-width: 760px; margin: 22px auto 0; animation: dropIn .85s .12s ease both;
+  }
+  .lang-pill{
+    background: rgba(56,163,160,0.12); backdrop-filter: blur(6px);
+    border:1px solid rgba(56,163,160,0.4); color: var(--teal);
+    font-family:'Poppins',sans-serif; font-weight:600; font-size: 12px;
+    letter-spacing:.04em; padding: 7px 15px; border-radius: 999px; cursor:pointer;
+    transition: all .2s ease;
+  }
+  .lang-pill:hover{ background: rgba(56,163,160,0.22); transform: translateY(-2px); }
+  .lang-pill.active{ background: var(--teal); border-color: var(--teal); color: #08201f; font-weight:700; }
+
+  .lang-badge{
+    position:absolute; top:10px; left:10px; z-index:2;
+    background: rgba(8,7,10,0.7); backdrop-filter: blur(4px);
+    border: 1px solid rgba(245,240,230,0.3); color: var(--paper);
+    font-family:'Poppins',sans-serif; font-weight:600; font-size: 10px;
+    letter-spacing:.03em; padding: 3px 9px; border-radius: 999px;
+  }
+
   .surprise-row{ text-align:center; margin-top: 22px; animation: dropIn 1s .2s ease both; }
   #surprise{
     background:none; border:1px solid var(--line); color: var(--paper);
@@ -289,6 +313,10 @@
       <div id="suggestions"></div>
     </div>
 
+    <div class="lang-row" id="langRow">
+      <!-- populated dynamically from /languages -->
+    </div>
+
     <div class="genre-row" id="genreRow">
       <button class="genre-pill" data-genre="Action">🔫 Action</button>
       <button class="genre-pill" data-genre="Adventure">🗺️ Adventure</button>
@@ -323,6 +351,7 @@ const suggEl = document.getElementById('suggestions');
 const statusLine = document.getElementById('statusLine');
 const resultsArea = document.getElementById('resultsArea');
 const genreRow = document.getElementById('genreRow');
+const langRow = document.getElementById('langRow');
 
 const RECOMMEND_LIMIT = 30;
 const LANG_HUES = [345, 218, 165, 35, 280, 15];
@@ -474,6 +503,7 @@ async function loadRecommendations(movieTitle){
 // ---------- genre browsing ----------
 function clearActiveGenre(){
   genreRow.querySelectorAll('.genre-pill').forEach(p => p.classList.remove('active'));
+  if(typeof clearActiveLang === 'function') clearActiveLang();
 }
 
 async function loadGenre(genreName, pillEl){
@@ -507,6 +537,69 @@ genreRow.querySelectorAll('.genre-pill').forEach(pill => {
   pill.addEventListener('click', () => loadGenre(pill.getAttribute('data-genre'), pill));
 });
 
+// ---------- language browsing ----------
+function clearActiveLang(){
+  langRow.querySelectorAll('.lang-pill').forEach(p => p.classList.remove('active'));
+}
+
+async function loadLanguage(langName, pillEl){
+  clearActiveGenre();
+  clearActiveLang();
+  if(pillEl) pillEl.classList.add('active');
+  searchEl.value = '';
+  clearBtn.classList.remove('show');
+  suggEl.classList.remove('show');
+  statusLine.innerHTML = '';
+  resultsArea.innerHTML = `<div class="loading"><div class="spinner"></div>Rounding up <b>${langName}</b> picks<span class="dots">...</span></div>`;
+
+  try{
+    const res = await fetch(`/language?name=${encodeURIComponent(langName)}&limit=${RECOMMEND_LIMIT}`);
+    const data = await res.json();
+
+    if(!res.ok){
+      resultsArea.innerHTML = `<div class="empty">${data.error || 'Something went wrong.'}</div>`;
+      return;
+    }
+    if(!Array.isArray(data) || data.length === 0){
+      resultsArea.innerHTML = `<div class="empty">No movies found for "${langName}".</div>`;
+      return;
+    }
+    renderResults(`Top <b>${langName}</b> picks`, data, false);
+  }catch(err){
+    resultsArea.innerHTML = `<div class="empty">Couldn't reach the recommendation engine. Is the Flask server running?</div>`;
+  }
+}
+
+async function loadLanguagePills(){
+  try{
+    const res = await fetch('/languages');
+    const langs = await res.json();
+    if(!Array.isArray(langs) || langs.length === 0) return;
+
+    const ICONS = { Tamil: '🎬', English: '🎞️', Hindi: '🎥', Telugu: '📽️', Malayalam: '🍿', Kannada: '🎦' };
+
+    langRow.innerHTML = `<button class="lang-pill active" data-lang="__all">🌐 All Languages</button>` +
+      langs.map(l => `<button class="lang-pill" data-lang="${l.replace(/"/g,'&quot;')}">${ICONS[l] || '🌍'} ${l}</button>`).join('');
+
+    langRow.querySelectorAll('.lang-pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        const lang = pill.getAttribute('data-lang');
+        if(lang === '__all'){
+          clearActiveLang();
+          pill.classList.add('active');
+          resultsArea.innerHTML = '';
+          statusLine.innerHTML = '';
+          return;
+        }
+        loadLanguage(lang, pill);
+      });
+    });
+  }catch(err){
+    // languages row is a nice-to-have; fail silently if the endpoint is unreachable
+  }
+}
+loadLanguagePills();
+
 function renderResults(headingHtml, movies, showSimilarity = true){
   resultsArea.innerHTML = `
     <div class="section-head">
@@ -524,6 +617,7 @@ function renderResults(headingHtml, movies, showSimilarity = true){
     card.style.animationDelay = `${Math.min(i * 0.04, 0.6)}s`;
     card.innerHTML = `
       <div class="poster" style="background:${posterGradient(m.title)}">
+        ${m.language ? `<span class="lang-badge">${m.language}</span>` : ''}
         <div class="meta-row">
           <span class="rank">${String(i+1).padStart(2,'0')}</span>
           ${showSimilarity && m.similarity !== undefined ? `<span class="sim-badge">${Math.round(m.similarity*100)}% match</span>` : ''}

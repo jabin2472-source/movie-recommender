@@ -5,30 +5,83 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 
 class MovieRecommender:
-    def __init__(self, movies_file, credits_file):
-        print("Loading TMDB datasets...")
+    def __init__(self, movies_file, credits_file, tamil_movies_file=None):
+        print("Loading TMDB dataset...")
 
         movies = pd.read_csv(movies_file)
         credits = pd.read_csv(credits_file)
 
         # The two TMDB files share the title column.
-        self.movies = movies.merge(credits, on="title")
+        tmdb = movies.merge(credits, on="title")
 
-        # Keep useful columns and remove duplicate/empty rows.
-        self.movies = self.movies[
+        # Keep useful columns.
+        tmdb = tmdb[
             ["title", "genres", "keywords", "overview", "cast", "crew",
              "vote_average", "release_date", "popularity"]
         ].copy()
 
-        self.movies = self.movies.drop_duplicates(subset="title")
-        self.movies["title"] = self.movies["title"].fillna("")
-        self.movies["overview"] = self.movies["overview"].fillna("")
+        tmdb["title"] = tmdb["title"].fillna("")
+        tmdb["overview"] = tmdb["overview"].fillna("")
+
+        # TMDB's own dataset stores the film's original language as a short
+        # code (e.g. "en", "hi", "ta") in the "original_language" column.
+        # We only care about two buckets here: Tamil, and everything else
+        # bucketed as English (matches the Tamil dataset we merge in below).
+        if "original_language" in movies.columns:
+            code_map = movies.drop_duplicates(subset="title").set_index("title")["original_language"]
+            codes = tmdb["title"].map(code_map).fillna("en").astype(str).str.lower()
+        else:
+            codes = pd.Series(["en"] * len(tmdb), index=tmdb.index)
+
+        tmdb["language"] = codes.apply(lambda c: "Tamil" if c == "ta" else "English")
 
         # Convert TMDB JSON-like columns into searchable text.
-        self.movies["genres_text"] = self.movies["genres"].apply(self.get_names)
-        self.movies["keywords_text"] = self.movies["keywords"].apply(self.get_names)
-        self.movies["cast_text"] = self.movies["cast"].apply(self.get_cast)
-        self.movies["crew_text"] = self.movies["crew"].apply(self.get_director)
+        tmdb["genres_text"] = tmdb["genres"].apply(self.get_names)
+        tmdb["keywords_text"] = tmdb["keywords"].apply(self.get_names)
+        tmdb["cast_text"] = tmdb["cast"].apply(self.get_cast)
+        tmdb["crew_text"] = tmdb["crew"].apply(self.get_director)
+
+        tmdb = tmdb[
+            ["title", "genres_text", "keywords_text", "cast_text", "crew_text",
+             "overview", "vote_average", "release_date", "popularity", "language"]
+        ]
+
+        frames = [tmdb]
+
+        if tamil_movies_file:
+            print("Loading Tamil movies dataset...")
+            tamil = pd.read_csv(tamil_movies_file)
+
+            years = pd.to_numeric(tamil["Year"], errors="coerce").fillna(0).astype(int)
+
+            tamil_df = pd.DataFrame({
+                "title": tamil["MovieName"].fillna(""),
+                "genres_text": tamil["Genre"].fillna("").apply(
+                    lambda g: str(g).replace(" ", "")
+                ),
+                "keywords_text": "",
+                "cast_text": tamil["Actor"].fillna("").apply(
+                    lambda a: str(a).replace(" ", "")
+                ),
+                "crew_text": tamil["Director"].fillna("").apply(
+                    lambda d: str(d).replace(" ", "")
+                ),
+                "overview": "",
+                "vote_average": pd.to_numeric(tamil["Rating"], errors="coerce").fillna(0),
+                "release_date": years.astype(str) + "-01-01",
+                "popularity": pd.to_numeric(tamil["PeopleVote"], errors="coerce").fillna(0),
+                "language": "Tamil",
+            })
+
+            frames.append(tamil_df)
+            print(f"Loaded {len(tamil_df)} Tamil movies.")
+
+        # Combine every dataset into one searchable/recommendable pool.
+        self.movies = pd.concat(frames, ignore_index=True)
+        self.movies = self.movies.drop_duplicates(subset="title")
+        # Reset the index so row labels line up 1:1 with the similarity
+        # matrix's row positions (dropping duplicates leaves gaps otherwise).
+        self.movies = self.movies.reset_index(drop=True)
 
         self.movies["tags"] = (
             self.movies["genres_text"] + " " +
@@ -53,7 +106,7 @@ class MovieRecommender:
             for index, title in self.movies["title"].items()
         }
 
-        print(f"Loaded {len(self.movies)} movies.")
+        print(f"Loaded {len(self.movies)} movies total.")
         print("Recommendation model is ready.")
 
     @staticmethod
@@ -103,7 +156,8 @@ class MovieRecommender:
             "rating": round(float(row["vote_average"]), 1),
             "overview": row["overview"],
             "genres": row["genres_text"].replace(" ", ", "),
-            "popularity": float(row["popularity"])
+            "popularity": float(row["popularity"]),
+            "language": row.get("language", "English")
         }
 
     def recommend(self, movie_name, limit=10):
@@ -177,3 +231,18 @@ class MovieRecommender:
 
         ordered = [name for name, _ in counts.most_common(top_n)]
         return ordered
+
+    def get_by_language(self, language_name, limit=20):
+        """Return top movies (by popularity) matching a given language, e.g. 'Tamil'."""
+        query = language_name.strip().lower()
+
+        matches = self.movies[
+            self.movies["language"].str.lower() == query
+        ].sort_values("popularity", ascending=False).head(limit)
+
+        return [self.format_movie(row) for _, row in matches.iterrows()]
+
+    def list_languages(self):
+        """Return the distinct languages present in the dataset, most common first."""
+        counts = self.movies["language"].value_counts()
+        return list(counts.index)
