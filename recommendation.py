@@ -1,11 +1,13 @@
 import ast
+import re
 import pandas as pd
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 
 class MovieRecommender:
-    def __init__(self, movies_file, credits_file, tamil_movies_file=None):
+    def __init__(self, movies_file, credits_file, tamil_movies_file=None,
+                 imdb_movies_file=None, extra_movies_file=None):
         print("Loading TMDB dataset...")
 
         movies = pd.read_csv(movies_file)
@@ -41,9 +43,13 @@ class MovieRecommender:
         tmdb["cast_text"] = tmdb["cast"].apply(self.get_cast)
         tmdb["crew_text"] = tmdb["crew"].apply(self.get_director)
 
+        tmdb["poster"] = ""
+        tmdb["duration"] = ""
+
         tmdb = tmdb[
             ["title", "genres_text", "keywords_text", "cast_text", "crew_text",
-             "overview", "vote_average", "release_date", "popularity", "language"]
+             "overview", "vote_average", "release_date", "popularity", "language",
+             "poster", "duration"]
         ]
 
         frames = [tmdb]
@@ -71,10 +77,109 @@ class MovieRecommender:
                 "release_date": years.astype(str) + "-01-01",
                 "popularity": pd.to_numeric(tamil["PeopleVote"], errors="coerce").fillna(0),
                 "language": "Tamil",
+                "poster": "",
+                "duration": "",
             })
 
             frames.append(tamil_df)
             print(f"Loaded {len(tamil_df)} Tamil movies.")
+
+        if imdb_movies_file:
+            print("Loading Tamil (IMDb) movies dataset...")
+            imdb = pd.read_csv(imdb_movies_file)
+
+            # Votes look like "28,737" or "595" (and some are blank) — strip commas.
+            votes = imdb["Votes"].astype(str).str.replace(",", "", regex=False)
+            votes = pd.to_numeric(votes, errors="coerce").fillna(0)
+
+            # Titles are numbered ("1. Thunivu") — strip the leading "N. ".
+            clean_titles = imdb["Movie Name"].fillna("").astype(str).str.replace(
+                r"^\d+\.\s*", "", regex=True
+            )
+
+            imdb_df = pd.DataFrame({
+                "title": clean_titles,
+                "genres_text": "",
+                "keywords_text": "",
+                "cast_text": "",
+                "crew_text": "",
+                "overview": imdb["Description"].fillna(""),
+                "vote_average": pd.to_numeric(imdb["IMdb rating"], errors="coerce").fillna(0),
+                "release_date": "",
+                "popularity": votes,
+                "language": "Tamil",
+                "poster": "",
+                "duration": imdb["Duration"].fillna("") if "Duration" in imdb.columns else "",
+            })
+
+            frames.append(imdb_df)
+            print(f"Loaded {len(imdb_df)} IMDb Tamil movies.")
+
+        if extra_movies_file:
+            print("Loading extra movies dataset...")
+            extra = pd.read_csv(extra_movies_file)
+
+            title_col = "title_x" if "title_x" in extra.columns else "title"
+            years = pd.to_numeric(
+                extra["year_of_release"], errors="coerce"
+            ).fillna(0).astype(int) if "year_of_release" in extra.columns else 0
+
+            genres_text = extra["genres"].fillna("").apply(
+                lambda g: " ".join(part.strip().replace(" ", "") for part in str(g).split("|") if part.strip())
+            ) if "genres" in extra.columns else ""
+
+            cast_text = extra["actors"].fillna("").apply(
+                lambda a: " ".join(part.strip().replace(" ", "") for part in str(a).split("|")[:5] if part.strip())
+            ) if "actors" in extra.columns else ""
+
+            overview = extra["story"].fillna(extra.get("summary", "")).fillna("") \
+                if "story" in extra.columns else extra.get("summary", "").fillna("")
+
+            duration = extra["runtime"].fillna("").astype(str).apply(
+                lambda r: f"{r} min" if r.strip().isdigit() else ""
+            ) if "runtime" in extra.columns else ""
+
+            # This dataset has no language column, so we detect it from the
+            # cast: it's built from Wikipedia's Hindi-cinema pages, so we
+            # default to "Hindi" and only override to "Tamil" when a known
+            # Tamil star appears in the cast. This is a heuristic, not
+            # perfect — but there's no language field to go on otherwise.
+            TAMIL_ACTORS = [
+                "Rajinikanth", "Kamal Haasan", "Vijay", "Ajith Kumar", "Suriya",
+                "Dhanush", "Vikram", "Sivakarthikeyan", "Simbu", "Silambarasan",
+                "Karthi", "Jayam Ravi", "Arya", "Vishal", "Nayanthara", "Trisha",
+                "Samantha", "Vijay Sethupathi", "Yogi Babu", "Prabhu Deva",
+                "Sarath Kumar", "Jyothika", "Sneha", "Vadivelu", "Santhanam",
+            ]
+            actors_raw = extra["actors"].fillna("") if "actors" in extra.columns else pd.Series([""] * len(extra))
+            language = actors_raw.apply(
+                lambda a: "Tamil" if any(t in str(a) for t in TAMIL_ACTORS) else "Hindi"
+            )
+
+            extra_df = pd.DataFrame({
+                "title": extra[title_col].fillna(""),
+                "genres_text": genres_text,
+                "keywords_text": "",
+                "cast_text": cast_text,
+                "crew_text": "",
+                "overview": overview,
+                "vote_average": pd.to_numeric(extra.get("imdb_rating", 0), errors="coerce").fillna(0),
+                "release_date": years.astype(str) + "-01-01" if "year_of_release" in extra.columns else "",
+                "popularity": pd.to_numeric(extra.get("imdb_votes", 0), errors="coerce").fillna(0),
+                "language": language,
+                "poster": extra["poster_path"].fillna("") if "poster_path" in extra.columns else "",
+                "duration": duration,
+            })
+
+            # Put this frame right after the TMDB frame (before the older
+            # Tamil sources, which don't carry posters) — when a title
+            # collides across sources, drop_duplicates keeps whichever
+            # row appears FIRST, so this order lets the poster-bearing
+            # row win instead of silently losing its poster.
+            frames.insert(1, extra_df)
+            print(f"Loaded {len(extra_df)} extra movies "
+                  f"({(language == 'Tamil').sum()} detected Tamil, "
+                  f"{(language == 'Hindi').sum()} detected Hindi).")
 
         # Combine every dataset into one searchable/recommendable pool.
         self.movies = pd.concat(frames, ignore_index=True)
@@ -150,6 +255,14 @@ class MovieRecommender:
         if isinstance(release, str) and len(release) >= 4:
             year = release[:4]
 
+        poster = row.get("poster", "")
+        if pd.isna(poster):
+            poster = ""
+
+        duration = row.get("duration", "")
+        if pd.isna(duration):
+            duration = ""
+
         return {
             "title": row["title"],
             "year": year,
@@ -157,7 +270,9 @@ class MovieRecommender:
             "overview": row["overview"],
             "genres": row["genres_text"].replace(" ", ", "),
             "popularity": float(row["popularity"]),
-            "language": row.get("language", "English")
+            "language": row.get("language", "English"),
+            "poster": poster,
+            "duration": duration
         }
 
     def recommend(self, movie_name, limit=10):

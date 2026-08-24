@@ -3,11 +3,13 @@ from recommendation import MovieRecommender
 
 app = Flask(__name__)
 
-# Load the TMDB 5000 dataset + Tamil movies dataset and build the recommendation model
+# Load every dataset and build the combined recommendation model
 recommender = MovieRecommender(
     "dataset/tmdb_5000_movies.csv",
     "dataset/tmdb_5000_credits.csv",
-    "dataset/Tamil_movies_dataset.csv"
+    "dataset/Tamil_movies_dataset.csv",
+    "dataset/imdb_processed.csv",
+    "dataset/movies.csv"
 )
 
 @app.route("/")

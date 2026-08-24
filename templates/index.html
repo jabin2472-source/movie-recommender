@@ -185,19 +185,24 @@
     aspect-ratio: 2/3; padding: 14px; display:flex; flex-direction:column; justify-content:space-between;
     position:relative; overflow:hidden;
   }
-  .poster::after{
-    content:''; position:absolute; inset:0;
-    background: linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,0.6) 100%);
+  .poster-img{
+    position:absolute; inset:0; width:100%; height:100%; object-fit:cover; z-index:0;
+    transition: transform .3s ease;
   }
-  .meta-row{ display:flex; justify-content:space-between; align-items:flex-start; position:relative; z-index:1;}
-  .rank{ font-family:'Bebas Neue',sans-serif; font-size: 30px; color: rgba(242,236,224,0.55); }
+  .card:hover .poster-img{ transform: scale(1.05); }
+  .poster::after{
+    content:''; position:absolute; inset:0; z-index:1;
+    background: linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,0.65) 100%);
+  }
+  .meta-row{ display:flex; justify-content:space-between; align-items:flex-start; position:relative; z-index:2;}
+  .rank{ font-family:'Bebas Neue',sans-serif; font-size: 30px; color: rgba(242,236,224,0.55); text-shadow: 0 2px 8px rgba(0,0,0,0.6); }
   .sim-badge{
     background: rgba(10,9,12,0.6); border:1px solid rgba(242,236,224,0.25);
     border-radius: 999px; padding: 3px 10px; font-size: 11px; letter-spacing:.04em;
     font-family:'Poppins',sans-serif; font-weight:500;
   }
-  .poster-title{ font-family:'Bebas Neue',sans-serif; letter-spacing:.02em; font-size: 22px; line-height:1.05; position:relative; z-index:1;}
-  .poster-sub{ font-size: 11px; color: rgba(242,236,224,0.7); margin-top:4px; position:relative; z-index:1;}
+  .poster-title{ font-family:'Bebas Neue',sans-serif; letter-spacing:.02em; font-size: 22px; line-height:1.05; position:relative; z-index:2; text-shadow: 0 2px 10px rgba(0,0,0,0.7);}
+  .poster-sub{ font-size: 11px; color: rgba(242,236,224,0.7); margin-top:4px; position:relative; z-index:2;}
   .card-body{ padding: 14px 16px 16px; display:flex; flex-direction:column; gap:8px; flex:1; }
   .card-body h3{ font-family:'Poppins',sans-serif; font-size: 14.5px; font-weight:600; }
   .rating{ color: var(--marquee); font-size: 13px; font-weight:600; }
@@ -617,6 +622,7 @@ function renderResults(headingHtml, movies, showSimilarity = true){
     card.style.animationDelay = `${Math.min(i * 0.04, 0.6)}s`;
     card.innerHTML = `
       <div class="poster" style="background:${posterGradient(m.title)}">
+        ${m.poster ? `<img class="poster-img" src="${m.poster}" alt="" loading="lazy" onerror="this.remove()">` : ''}
         ${m.language ? `<span class="lang-badge">${m.language}</span>` : ''}
         <div class="meta-row">
           <span class="rank">${String(i+1).padStart(2,'0')}</span>
@@ -624,7 +630,7 @@ function renderResults(headingHtml, movies, showSimilarity = true){
         </div>
         <div>
           <div class="poster-title">${m.title}</div>
-          <div class="poster-sub">${m.year || 'Year unknown'}</div>
+          <div class="poster-sub">${m.year || (m.duration ? '' : 'Year unknown')}${m.duration ? (m.year ? ' · ' : '') + m.duration : ''}</div>
         </div>
       </div>
       <div class="card-body">

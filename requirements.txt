@@ -1,4 +1,5 @@
-Flask
-pandas
-scikit-learn
-gunicorn
+Flask==3.0.3
+pandas==2.2.2
+scikit-learn==1.5.1
+gunicorn==22.0.0
+requests==2.32.3
