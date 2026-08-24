@@ -198,13 +198,17 @@ class MovieRecommender:
 
         self.movies["tags"] = self.movies["tags"].str.lower()
 
-        # Convert movie text into vectors and calculate similarity.
+        # Convert movie text into vectors. We deliberately do NOT precompute
+        # a full NxN similarity matrix here — for ~7000 movies that matrix
+        # alone is 100s of MB (grows with the square of the movie count),
+        # which is more than free-tier hosts like Render (512MB) allow.
+        # Instead we keep the sparse vectors and compute similarity for
+        # just one movie at a time, on demand, inside recommend().
         self.vectorizer = CountVectorizer(
             max_features=5000,
             stop_words="english"
         )
-        vectors = self.vectorizer.fit_transform(self.movies["tags"])
-        self.similarity = cosine_similarity(vectors)
+        self.vectors = self.vectorizer.fit_transform(self.movies["tags"])
 
         self.title_to_index = {
             title.lower(): index
@@ -292,7 +296,11 @@ class MovieRecommender:
                 return []
             index = matches[0][1]
 
-        scores = list(enumerate(self.similarity[index]))
+        # Compute similarity between this ONE movie and every other movie,
+        # on the spot — not the full NxN matrix. cosine_similarity on a
+        # single row is cheap and memory-light even with thousands of movies.
+        sims = cosine_similarity(self.vectors[index], self.vectors)[0]
+        scores = list(enumerate(sims))
         scores = sorted(scores, key=lambda x: x[1], reverse=True)
 
         results = []
